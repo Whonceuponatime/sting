@@ -1,0 +1,5 @@
+# Name,    Type, SubType, Offset,   Size
+# Session log lives in NVS; 256 KB leaves room for hundreds of sessions.
+nvs,       data, nvs,     0x9000,   0x40000
+phy_init,  data, phy,     0x49000,  0x1000
+factory,   app,  factory, 0x50000,  0x180000

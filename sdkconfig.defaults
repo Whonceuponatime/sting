@@ -1,0 +1,20 @@
+CONFIG_IDF_TARGET="esp32s3"
+
+# One binary for every DevKitC-1 flash size (see platformio.ini)
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# Console/CLI on UART0 only ("UART" port). The native "USB" port belongs to
+# the probe, so the USB-Serial-JTAG console must stay off.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# Keep the serial output clean for reports
+CONFIG_LOG_DEFAULT_LEVEL_WARN=y
+CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
+
+CONFIG_FREERTOS_HZ=1000
+
+# NVS + flash writes run on the main task
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192

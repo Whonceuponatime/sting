@@ -1,0 +1,9 @@
+.pio/
+.vscode/
+build/
+managed_components/
+dependencies.lock
+sdkconfig
+sdkconfig.old
+sdkconfig.devkitc1*
+*.pyc

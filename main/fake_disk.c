@@ -1,0 +1,115 @@
+// Fake drive: an 8 KB FAT12 volume holding a single README.TXT.
+//
+// Layout (1 sector per cluster, 512-byte sectors):
+//   sector 0     boot sector / BPB
+//   sector 1     FAT
+//   sector 2     root directory (16 entries)
+//   sector 3     README.TXT (cluster 2)
+//   sector 4-15  empty
+//
+// The volume is read-only and contains no executable content.
+
+#include "fake_disk.h"
+
+#include <string.h>
+
+static const char README[] =
+    "STING USB port liveness tester\r\n"
+    "\r\n"
+    "This is a read-only test volume presented by a port test tool.\r\n"
+    "It holds no data and no executable content.\r\n";
+
+#define README_SIZE (sizeof(README) - 1)
+_Static_assert(sizeof(README) - 1 <= FAKE_DISK_BLOCK_SIZE, "README must fit in one sector");
+
+#define VOLUME_LABEL "STING TEST " // exactly 11 characters
+
+// FAT date for 2026-01-01
+#define FAT_DATE (((2026 - 1980) << 9) | (1 << 5) | 1)
+
+static void put16(uint8_t *p, uint16_t v)
+{
+    p[0] = (uint8_t)v;
+    p[1] = (uint8_t)(v >> 8);
+}
+
+static void put32(uint8_t *p, uint32_t v)
+{
+    put16(p, (uint16_t)v);
+    put16(p + 2, (uint16_t)(v >> 16));
+}
+
+static void boot_sector(uint8_t *b)
+{
+    b[0] = 0xEB; // jump
+    b[1] = 0x3C;
+    b[2] = 0x90;
+    memcpy(b + 3, "MSDOS5.0", 8);          // OEM name
+    put16(b + 11, FAKE_DISK_BLOCK_SIZE);   // bytes per sector
+    b[13] = 1;                             // sectors per cluster
+    put16(b + 14, 1);                      // reserved sectors
+    b[16] = 1;                             // number of FATs
+    put16(b + 17, 16);                     // root directory entries
+    put16(b + 19, FAKE_DISK_BLOCK_COUNT);  // total sectors
+    b[21] = 0xF8;                          // media descriptor
+    put16(b + 22, 1);                      // sectors per FAT
+    put16(b + 24, 1);                      // sectors per track
+    put16(b + 26, 1);                      // heads
+    put32(b + 28, 0);                      // hidden sectors
+    put32(b + 32, 0);                      // total sectors (32-bit, unused)
+    b[36] = 0x80;                          // drive number
+    b[38] = 0x29;                          // extended boot signature
+    put32(b + 39, 0x53544E47);             // volume serial
+    memcpy(b + 43, VOLUME_LABEL, 11);
+    memcpy(b + 54, "FAT12   ", 8);
+    b[510] = 0x55;
+    b[511] = 0xAA;
+}
+
+static void fat_sector(uint8_t *b)
+{
+    // Entries 0 and 1 are reserved; cluster 2 (README) is end-of-chain.
+    b[0] = 0xF8;
+    b[1] = 0xFF;
+    b[2] = 0xFF;
+    b[3] = 0xFF;
+    b[4] = 0x0F;
+}
+
+static void dir_entry(uint8_t *e, const char *name11, uint8_t attr, uint16_t cluster, uint32_t size)
+{
+    memcpy(e, name11, 11);
+    e[11] = attr;
+    put16(e + 16, FAT_DATE); // created
+    put16(e + 18, FAT_DATE); // accessed
+    put16(e + 24, FAT_DATE); // modified
+    put16(e + 26, cluster);
+    put32(e + 28, size);
+}
+
+static void root_dir_sector(uint8_t *b)
+{
+    dir_entry(b, VOLUME_LABEL, 0x08, 0, 0);                    // volume label
+    dir_entry(b + 32, "README  TXT", 0x21, 2, README_SIZE);    // read-only + archive
+}
+
+void fake_disk_read_block(uint32_t lba, uint8_t *block)
+{
+    memset(block, 0, FAKE_DISK_BLOCK_SIZE);
+    switch (lba) {
+    case 0:
+        boot_sector(block);
+        break;
+    case 1:
+        fat_sector(block);
+        break;
+    case 2:
+        root_dir_sector(block);
+        break;
+    case 3:
+        memcpy(block, README, README_SIZE);
+        break;
+    default:
+        break;
+    }
+}
