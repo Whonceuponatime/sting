@@ -329,6 +329,7 @@ int32_t tud_msc_read10_cb(uint8_t lun, uint32_t lba, uint32_t offset, void *buff
     uint8_t *out = buffer;
     uint32_t done = 0;
     uint32_t sectors = 0;
+    uint16_t touched = 0; // sectors this request read from (bit N = LBA N)
     while (done < bufsize && lba < FAKE_DISK_BLOCK_COUNT) {
         uint32_t chunk = FAKE_DISK_BLOCK_SIZE - offset;
         if (chunk > bufsize - done) {
@@ -336,6 +337,7 @@ int32_t tud_msc_read10_cb(uint8_t lun, uint32_t lba, uint32_t offset, void *buff
         }
         fake_disk_read_block(lba, block);
         memcpy(out + done, block + offset, chunk);
+        touched |= (uint16_t)(1u << lba);
         done += chunk;
         offset += chunk;
         if (offset == FAKE_DISK_BLOCK_SIZE) { // finished a whole sector
@@ -345,10 +347,11 @@ int32_t tud_msc_read10_cb(uint8_t lun, uint32_t lba, uint32_t offset, void *buff
         }
     }
 
-    if (sectors > 0) {
+    if (sectors > 0 || touched != 0) {
         uint32_t now = probe_now_ms();
         LOCK();
         s_obs.msc_sectors_read += sectors;
+        s_obs.msc_lba_read_mask |= touched;
         changed(now);
         UNLOCK();
     }

@@ -50,13 +50,18 @@ typedef struct {
     uint16_t configured_count;
     uint16_t hid_reports;    // input reports the host collected
     uint16_t desc_count[DESC_KIND_COUNT];
+    // One bit per sector the host read (bit N = LBA N). The fake drive has 16
+    // sectors, so which bits are set shows whether the host only identified the
+    // disk or went on to read the directory and the file: evidence of the host
+    // inspecting the volume's contents, not just its size.
+    uint16_t msc_lba_read_mask;
     uint8_t msc_flags;
     uint8_t hid_flags;
     uint8_t marker_len;      // keys in the marker
     uint8_t marker_sent;     // keys the host actually collected
 } observation_t;
 
-#define SESSION_REC_VERSION 1
+#define SESSION_REC_VERSION 2
 
 // One stored session (NVS blob).
 typedef struct {

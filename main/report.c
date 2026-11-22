@@ -5,6 +5,8 @@
 
 #include <stdio.h>
 
+#include "fake_disk.h"
+
 static const char *const DESC_NAMES[DESC_KIND_COUNT] = {
     [DESC_DEVICE] = "DEVICE",
     [DESC_CONFIGURATION] = "CONFIGURATION",
@@ -32,6 +34,50 @@ static void print_stage(int index, const char *name, uint32_t t_ms, const char *
         printf("  %d %-13s no\n", index, name);
     } else {
         printf("  %d %-13s YES  %-12s %s\n", index, name, fmt_time(t_ms, tb), reached_text);
+    }
+}
+
+// What the host's sector reads reveal about its access to the volume. A host
+// that only reads the boot sector merely identified the disk; one that reads
+// the root directory listed the files; one that then reads the file sector
+// pulled a file's contents. The last is direct evidence that file exchange is
+// possible on this port, and is how a host inspecting the volume on insertion
+// (AutoPlay / autorun-style behaviour) shows up.
+static void print_read_detail(const observation_t *o)
+{
+    uint16_t m = o->msc_lba_read_mask;
+    if (m == 0) {
+        return;
+    }
+    bool boot = m & (1u << FAKE_DISK_LBA_BOOT);
+    bool dir = m & (1u << FAKE_DISK_LBA_ROOTDIR);
+    bool file = m & (1u << FAKE_DISK_LBA_FILE);
+
+    printf("%20ssectors accessed:", "");
+    const char *sep = " ";
+    for (int lba = 0; lba < FAKE_DISK_BLOCK_COUNT; lba++) {
+        if (m & (1u << lba)) {
+            const char *tag = "";
+            if (lba == FAKE_DISK_LBA_BOOT) tag = "=boot";
+            else if (lba == FAKE_DISK_LBA_FAT) tag = "=FAT";
+            else if (lba == FAKE_DISK_LBA_ROOTDIR) tag = "=dir";
+            else if (lba == FAKE_DISK_LBA_FILE) tag = "=file";
+            printf("%s%d%s", sep, lba, tag);
+            sep = ", ";
+        }
+    }
+    printf("\n");
+
+    printf("%20shost access reached: ", "");
+    if (file) {
+        printf("file contents - the host read a file off the volume "
+               "(file exchange is possible on this port)\n");
+    } else if (dir) {
+        printf("file listing - the host read the directory but not the file contents\n");
+    } else if (boot) {
+        printf("volume identification only - the host read the boot sector, no directory or file\n");
+    } else {
+        printf("data sectors only (no boot sector read)\n");
     }
 }
 
@@ -95,6 +141,7 @@ void report_print_session(const session_rec_t *r)
             printf(" (first %s)", fmt_time(o->t_msc_read, tb));
         }
         printf("\n");
+        print_read_detail(o);
     }
 
     // 6. Keyboard

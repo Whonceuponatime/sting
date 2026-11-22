@@ -148,6 +148,8 @@ int main(int argc, char **argv)
     active.obs.t_msc_capacity = 950;
     active.obs.t_msc_read = 1020;
     active.obs.msc_sectors_read = 37;
+    active.obs.msc_lba_read_mask = (1u << FAKE_DISK_LBA_BOOT) | (1u << FAKE_DISK_LBA_FAT) |
+                                   (1u << FAKE_DISK_LBA_ROOTDIR) | (1u << FAKE_DISK_LBA_FILE);
     active.obs.t_hid = 800;
     active.obs.hid_flags = HID_F_REPORT_DESC | HID_F_SET_IDLE | HID_F_SET_REPORT | HID_F_POLLED;
     active.obs.desc_count[DESC_HID_REPORT] = 1;
@@ -155,6 +157,8 @@ int main(int argc, char **argv)
     active.obs.marker_sent = 12;
     active.obs.t_marker_done = 2900;
     CHECK(session_verdict(&active.obs) == VERDICT_ACTIVE);
+    CHECK(active.obs.msc_lba_read_mask & (1u << FAKE_DISK_LBA_FILE));   // file read seen
+    CHECK(active.obs.msc_lba_read_mask & (1u << FAKE_DISK_LBA_ROOTDIR)); // dir read seen
 
     // Storage blocked by policy, keyboard accepted.
     session_rec_t kbd_only = blank(2, "FDS-USB2", true, 30004);

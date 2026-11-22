@@ -77,7 +77,13 @@ tester cannot log a session it never booted for.
    verdict: if it happens, the port is **not** logically disabled.
 4. **Configuration** - the host selects the device configuration.
 5. **Mass storage** - the host's storage driver sends SCSI commands: inquiry,
-   capacity, sector reads.
+   capacity, sector reads. The report records *which* sectors the host read,
+   so it distinguishes a host that merely identified the disk (boot sector
+   only) from one that read the directory listing and the file contents. A
+   host that reads the file sector has demonstrated that file exchange is
+   possible on that port; a host that reads the volume on insertion
+   (AutoPlay / autorun-style behaviour) shows up here too. The tester never
+   initiates a transfer: every sector counted was requested by the host.
 6. **Keyboard (HID)** - the host's keyboard driver attaches. The tester then
    types a harmless marker string, never commands.
 
@@ -107,7 +113,8 @@ the keyboard accepted, and the per-stage detail shows which.
 - Session number and label
 - Each stage reached, with its time since tester power-up
 - Descriptor types requested, with counts
-- Whether storage was read, and how many sectors
+- Whether storage was read, how many sectors, and which sectors (boot /
+  directory / file): how far the host went into the volume's contents
 - Whether the keyboard was accepted, and how much of the marker was typed
 - Final verdict
 
@@ -123,6 +130,8 @@ Layout of one session (values illustrative):
   4 configuration YES  t+0.731 s    host selected the configuration
   5 mass storage  YES  t+0.902 s    first SCSI command from the host
                     inquiry: yes | capacity read: yes (t+0.950 s) | sectors read: 37 (first t+1.020 s)
+                    sectors accessed: 0=boot, 1=FAT, 2=dir, 3=file
+                    host access reached: file contents - the host read a file off the volume (file exchange is possible on this port)
   6 keyboard      YES  t+0.800 s    host keyboard (HID) driver attached
                     report descriptor fetched: yes | LED state written by host: yes | input reports collected: 25
                     marker: 12 of 12 keys typed (done t+2.900 s)
@@ -220,6 +229,11 @@ Verified so far:
 
 - The firmware builds cleanly (PlatformIO `espressif32@8.0.0`, ESP-IDF 6.1,
   TinyUSB 0.21).
+- Flashed to an ESP32-S3-DevKitC-1 and run against a live laptop port: it
+  enumerated, was configured, the host read the volume (boot, FAT, directory
+  and file sectors) and accepted the keyboard, giving `ACTIVE`. The UART CLI
+  (`report`, `clear`, `label`) works, and the laptop connection used to read
+  the report was correctly not recorded as a session.
 - The host tests pass, and the generated test volume opens as a valid FAT12
   disk in an independent tool (7-Zip).
 
