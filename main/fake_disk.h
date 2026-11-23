@@ -14,6 +14,7 @@
 #define FAKE_DISK_LBA_FAT     1 // file allocation table
 #define FAKE_DISK_LBA_ROOTDIR 2 // root directory (file listing)
 #define FAKE_DISK_LBA_FILE    3 // README.TXT contents
+#define FAKE_DISK_LBA_EICAR   4 // EICAR.COM contents (antivirus test file)
 
 // Fill `block` (FAKE_DISK_BLOCK_SIZE bytes) with the contents of sector `lba`.
 void fake_disk_read_block(uint32_t lba, uint8_t *block);

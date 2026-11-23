@@ -107,3 +107,10 @@ static inline const char *verdict_name(verdict_t v)
 // That proves this power-up is a laptop connection, not a port test, so the
 // current session is removed from the log and recording stops until reboot.
 void session_enter_cli_mode(void);
+
+// True once the tester is in CLI/laptop mode (see session_enter_cli_mode).
+bool session_is_cli_mode(void);
+
+// Fill `out` with the current session built from the live observations.
+// Returns false in CLI/laptop mode, where no port test is in progress.
+bool session_live_snapshot(session_rec_t *out);

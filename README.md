@@ -143,11 +143,51 @@ Layout of one session (values illustrative):
 - A composite USB device, `303a:4006`, manufacturer `STING`, product
   `USB Port Liveness Tester`, with the chip's MAC address as serial number.
   It is meant to be easy to find in the host's own device and event logs.
-- A write-protected 8 KB FAT12 volume `STING TEST` holding one `README.TXT`.
-  Nothing can be written to it and it contains nothing executable.
+- A write-protected FAT12 volume `STING TEST` holding a plain-text
+  `README.TXT` and, when `EICAR_ENABLED` is set, `EICAR.COM` (see below).
+  Nothing can be written to it.
 - A keyboard that types `stingusbtest` once, about 1.5 s after the host
   configures it. The marker is limited to `a-z` and `0-9`: no Enter, Tab,
   Space, modifier or function keys.
+
+## Antivirus test (EICAR)
+
+When `EICAR_ENABLED` is set (the default), the fake drive also carries
+`EICAR.COM`, the standard **EICAR anti-malware test file** - a harmless,
+industry-standard 68-byte string published specifically for testing antivirus
+software. It is not malware and does nothing if run. It lets you check whether
+the system under test runs antivirus that scans USB media: if it does, reading
+the volume should make it alert on or quarantine the file. The report shows
+whether the host read the EICAR sector; whether its antivirus reacted is
+confirmed on the host side.
+
+The string is stored XOR-obfuscated and reconstructed only in RAM when the host
+reads it, so the genuine signature never appears in this firmware image or its
+source - an antivirus on your build machine will not quarantine them. Set
+`EICAR_ENABLED 0` in `main/config.h` to leave the file off the drive.
+
+## WiFi live read
+
+When `WIFI_READ_ENABLED` is set (the default), the tester raises its own WiFi
+access point so you can watch a test live from a phone, without the laptop:
+
+1. Join the WiFi network **`STING`** (open, no password).
+2. Open **`http://sting.local/`** (Apple devices and most desktops) or
+   **`http://192.168.4.1/`** (works everywhere, including Android).
+
+The page shows the current test updating every second - the stages lighting
+up, the verdict, the sectors read - and links to the full stored report in the
+same text as the UART console. It is a closed point-to-point link: the board is
+the access point and nothing is routed to any other network. The radio comes up
+~1.5 s after USB so it never disturbs the first enumeration.
+
+The radio is a convenience, not evidence. For a radio-silent, cleanly auditable
+build - or where transmitters are not permitted - set `WIFI_READ_ENABLED 0` and
+nothing is ever transmitted. See [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md)
+for the reasoning on when to leave it off.
+
+> Note: `sting.local` resolves over mDNS, which works on Apple devices and most
+> desktops but not in many Android browsers. On Android, use `192.168.4.1`.
 
 ## Things to know before relying on a result
 
@@ -182,18 +222,21 @@ Layout of one session (values illustrative):
 
 - One connection at a time: never laptop and system together.
 - The keyboard function types only the harmless marker string.
-- Get the system owner's permission before testing live equipment.
+- `EICAR.COM` is the inert, standard antivirus *test* file, not malware.
+- Get the system owner's permission before testing live equipment, and agree in
+  advance on the keyboard marker and whether the WiFi radio may be used.
 
 ## Out of scope for the MVP
 
 - File-extension filtering tests (for example the `.ccp`-only claim)
 - Ethernet port testing
-- Any payload beyond the benign marker
+- Any payload beyond the benign marker and the EICAR antivirus test file
 
 ## Settings
 
 All in [`main/config.h`](main/config.h): observation window, USB identity,
-marker text, LED pins and brightness, log size.
+marker text, LED pins and brightness, log size, `EICAR_ENABLED`, and the WiFi
+settings (`WIFI_READ_ENABLED`, SSID, password, hostname).
 
 The RGB LED is on GPIO48 on DevKitC-1 v1.0 and GPIO38 on v1.1; the firmware
 drives both.
@@ -204,12 +247,16 @@ drives both.
 |---|---|
 | `main/main.c` | session loop: when to save, LED state |
 | `main/usb_probe.c` | USB device (TinyUSB) and everything it observes |
-| `main/fake_disk.c` | the read-only FAT12 test volume |
+| `main/fake_disk.c` | the read-only FAT12 test volume, README and EICAR |
 | `main/store.c` | session log in flash (NVS) |
 | `main/cli.c` | UART commands |
-| `main/report.c` | report text for one session |
+| `main/report.c` | report text (shared by the UART console and WiFi) |
+| `main/webread.c` | WiFi access point and live-read web server |
 | `main/led.c` | RGB LED |
 | `tests/host/` | PC-side checks of the test volume, verdict rules and report text |
+
+See [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md) for a full explanation of the
+method and what each result means.
 
 ## Host tests
 
@@ -228,23 +275,22 @@ It prints one sample session per verdict and ends with `ALL CHECKS PASSED`.
 Verified so far:
 
 - The firmware builds cleanly (PlatformIO `espressif32@8.0.0`, ESP-IDF 6.1,
-  TinyUSB 0.21).
-- Flashed to an ESP32-S3-DevKitC-1 and run against a live laptop port: it
-  enumerated, was configured, the host read the volume (boot, FAT, directory
-  and file sectors) and accepted the keyboard, giving `ACTIVE`. The UART CLI
-  (`report`, `clear`, `label`) works, and the laptop connection used to read
-  the report was correctly not recorded as a session.
+  TinyUSB 0.21, mDNS).
+- Core probe tested on an ESP32-S3-DevKitC-1 (firmware 0.2): a live laptop port
+  gave `ACTIVE` (enumerated, configured, volume read, keyboard accepted, marker
+  typed into Notepad); a USB power bank gave `DISABLED` (powered, no bus
+  activity). The UART CLI (`report`, `clear`, `label`) works, and the laptop
+  connection used to read reports was correctly not recorded as a session.
 - The host tests pass, and the generated test volume opens as a valid FAT12
   disk in an independent tool (7-Zip).
 
-**Not yet run on a board.** Before the tool is used as evidence, bench-test it
-against ports whose state is known:
+**Added since that hardware run and not yet bench-tested:** the per-sector
+file-access detail, the EICAR antivirus test file, and the WiFi live read
+(current firmware 0.5). Before relying on them, confirm on hardware:
 
-1. A laptop USB port: expect green, `ACTIVE`, and `stingusbtest` typed into a
-   text editor that has focus.
-2. A USB charger or power bank: expect red, `DISABLED`, and stage 2
-   (bus activity) reported as `no`.
-3. A PC port disabled in firmware setup or Device Manager, and a PC with USB
-   storage blocked by policy: note which verdict each one gives.
-4. `report`, `clear` and `label` on the UART port, and that the laptop
-   power-up does not appear as a session.
+1. EICAR: against a host running antivirus, check it alerts on or quarantines
+   `EICAR.COM` when the volume is read, and that the report shows the EICAR
+   sector as read.
+2. WiFi: join the `STING` network and confirm the live page updates and the
+   full report loads, at `sting.local` (Apple) and `192.168.4.1` (any device).
+3. Re-confirm `ACTIVE` and `DISABLED` as above, since the firmware changed.

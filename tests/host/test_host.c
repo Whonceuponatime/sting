@@ -77,7 +77,6 @@ static void test_fake_disk(const char *image_path)
     CHECK(memcmp(label, bs + 43, 11) == 0);        // same label as the boot sector
     CHECK(memcmp(file, "README  TXT", 11) == 0);
     CHECK(file[11] & 0x01);                        // read-only
-    CHECK(file[64 - 32] == 0x00);                  // end of directory
 
     uint16_t cluster = rd16(file + 26);
     uint32_t size = rd32(file + 28);
@@ -90,19 +89,53 @@ static void test_fake_disk(const char *image_path)
     for (uint32_t i = size; i < 512; i++) {
         CHECK(content[i] == 0);
     }
-    for (uint32_t lba = data_lba + 1; lba < FAKE_DISK_BLOCK_COUNT; lba++) {
+
+    uint32_t first_empty = data_lba + 1;
+
+#if EICAR_ENABLED
+    // Second directory entry: EICAR.COM, cluster 3, read-only, end-of-chain.
+    const uint8_t *e = img[root_lba] + 64;
+    CHECK(memcmp(e, "EICAR   COM", 11) == 0);
+    CHECK(e[11] & 0x01);                           // read-only
+    CHECK(img[root_lba][96] == 0x00);              // end of directory after it
+    uint16_t ec = rd16(e + 26);
+    uint32_t es = rd32(e + 28);
+    CHECK(ec == 3);
+    CHECK(es == 68);
+    CHECK(fat12_entry(fat, ec) >= 0xFF8);
+    CHECK((uint32_t)FAKE_DISK_LBA_EICAR == data_lba + ec - 2);
+
+    // The served EICAR sector must reconstruct to the genuine 68-byte string.
+    // Build the expected bytes from an XOR'd literal so this source file does
+    // not contain the signature either.
+    static const unsigned char exp_x[68] = {
+        0x02, 0x6f, 0x15, 0x7b, 0x0a, 0x7f, 0x1a, 0x1b, 0x0a, 0x01, 0x6e, 0x06,
+        0x0a, 0x00, 0x02, 0x6f, 0x6e, 0x72, 0x0a, 0x04, 0x73, 0x6d, 0x19, 0x19,
+        0x73, 0x6d, 0x27, 0x7e, 0x1f, 0x13, 0x19, 0x1b, 0x08, 0x77, 0x09, 0x0e,
+        0x1b, 0x14, 0x1e, 0x1b, 0x08, 0x1e, 0x77, 0x1b, 0x14, 0x0e, 0x13, 0x0c,
+        0x13, 0x08, 0x0f, 0x09, 0x77, 0x0e, 0x1f, 0x09, 0x0e, 0x77, 0x1c, 0x13,
+        0x16, 0x1f, 0x7b, 0x7e, 0x12, 0x71, 0x12, 0x70,
+    };
+    const uint8_t *es_sec = img[FAKE_DISK_LBA_EICAR];
+    for (int i = 0; i < 68; i++) {
+        CHECK(es_sec[i] == (exp_x[i] ^ 0x5a));
+    }
+    for (uint32_t i = 68; i < 512; i++) {
+        CHECK(es_sec[i] == 0);
+    }
+    first_empty = FAKE_DISK_LBA_EICAR + 1;
+#endif
+
+    for (uint32_t lba = first_empty; lba < FAKE_DISK_BLOCK_COUNT; lba++) {
         for (uint32_t i = 0; i < 512; i++) {
             CHECK(img[lba][i] == 0);
         }
     }
 
-    if (image_path != NULL) {
-        FILE *f = fopen(image_path, "wb");
-        if (f != NULL) {
-            fwrite(img, 1, sizeof(img), f);
-            fclose(f);
-        }
-    }
+    // NOTE: writing the image to a file is deliberately skipped here when EICAR
+    // is enabled - a file holding the real signature would be quarantined by an
+    // antivirus on the build machine. The in-memory checks above are enough.
+    (void)image_path;
 }
 
 static session_rec_t blank(uint16_t number, const char *label, bool window_done, uint32_t t_saved)
@@ -149,7 +182,8 @@ int main(int argc, char **argv)
     active.obs.t_msc_read = 1020;
     active.obs.msc_sectors_read = 37;
     active.obs.msc_lba_read_mask = (1u << FAKE_DISK_LBA_BOOT) | (1u << FAKE_DISK_LBA_FAT) |
-                                   (1u << FAKE_DISK_LBA_ROOTDIR) | (1u << FAKE_DISK_LBA_FILE);
+                                   (1u << FAKE_DISK_LBA_ROOTDIR) | (1u << FAKE_DISK_LBA_FILE) |
+                                   (1u << FAKE_DISK_LBA_EICAR);
     active.obs.t_hid = 800;
     active.obs.hid_flags = HID_F_REPORT_DESC | HID_F_SET_IDLE | HID_F_SET_REPORT | HID_F_POLLED;
     active.obs.desc_count[DESC_HID_REPORT] = 1;

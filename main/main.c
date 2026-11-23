@@ -14,6 +14,7 @@
 #include "session.h"
 #include "store.h"
 #include "usb_probe.h"
+#include "webread.h"
 
 #define TICK_MS 20
 
@@ -34,6 +35,33 @@ void session_enter_cli_mode(void)
         }
     }
     xSemaphoreGive(s_mutex);
+}
+
+bool session_is_cli_mode(void)
+{
+    return s_cli_mode;
+}
+
+// Build the current session from the live observations, so the WiFi live read
+// shows exactly what the UART report would. Returns false in CLI/laptop mode,
+// where there is no port test in progress.
+bool session_live_snapshot(session_rec_t *out)
+{
+    if (s_cli_mode) {
+        return false;
+    }
+    uint32_t now = probe_now_ms();
+    memset(out, 0, sizeof(*out));
+    out->version = SESSION_REC_VERSION;
+    out->size = sizeof(*out);
+    out->number = (uint16_t)(store_count() + 1); // provisional number
+    out->window_done = now >= OBSERVE_WINDOW_MS;
+    out->window_ms = OBSERVE_WINDOW_MS;
+    out->t_saved = now;
+    strlcpy(out->fw, STING_VERSION, sizeof(out->fw));
+    store_get_label(out->label, sizeof(out->label));
+    probe_snapshot(&out->obs, NULL, NULL);
+    return true;
 }
 
 // Write the session to flash when there is something new worth keeping.
@@ -143,6 +171,7 @@ void app_main(void)
     probe_start(); // USB first, so the host is never kept waiting
     led_init();
     cli_start(store_ok);
+    webread_start(); // WiFi live read, brought up after USB has enumerated
 
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(TICK_MS));

@@ -1,17 +1,21 @@
-// Fake drive: an 8 KB FAT12 volume holding a single README.TXT.
+// Fake drive: a small read-only FAT12 volume.
 //
 // Layout (1 sector per cluster, 512-byte sectors):
 //   sector 0     boot sector / BPB
 //   sector 1     FAT
 //   sector 2     root directory (16 entries)
-//   sector 3     README.TXT (cluster 2)
-//   sector 4-15  empty
+//   sector 3     README.TXT  (cluster 2)
+//   sector 4     EICAR.COM   (cluster 3)  -- only when EICAR_ENABLED
+//   sector 5-15  empty
 //
-// The volume is read-only and contains no executable content.
+// The README holds no executable content. The optional EICAR.COM holds the
+// standard, harmless EICAR antivirus test string (see config.h and below).
 
 #include "fake_disk.h"
 
 #include <string.h>
+
+#include "config.h"
 
 static const char README[] =
     "STING USB port liveness tester\r\n"
@@ -21,6 +25,26 @@ static const char README[] =
 
 #define README_SIZE (sizeof(README) - 1)
 _Static_assert(sizeof(README) - 1 <= FAKE_DISK_BLOCK_SIZE, "README must fit in one sector");
+
+#if EICAR_ENABLED
+// The EICAR anti-malware test file, stored XOR'd with EICAR_KEY so the literal
+// 68-byte signature never appears in this source or in the firmware image (an
+// antivirus on the BUILD machine would otherwise quarantine them). It is
+// reconstructed into the sector buffer only when the host reads it, so the
+// system under test sees the genuine, detectable file. EICAR is not malware:
+// it is an inert pattern published by EICAR purely to test antivirus software.
+#define EICAR_KEY  0x5a
+#define EICAR_SIZE 68
+static const uint8_t EICAR_X[EICAR_SIZE] = {
+    0x02, 0x6f, 0x15, 0x7b, 0x0a, 0x7f, 0x1a, 0x1b, 0x0a, 0x01, 0x6e, 0x06,
+    0x0a, 0x00, 0x02, 0x6f, 0x6e, 0x72, 0x0a, 0x04, 0x73, 0x6d, 0x19, 0x19,
+    0x73, 0x6d, 0x27, 0x7e, 0x1f, 0x13, 0x19, 0x1b, 0x08, 0x77, 0x09, 0x0e,
+    0x1b, 0x14, 0x1e, 0x1b, 0x08, 0x1e, 0x77, 0x1b, 0x14, 0x0e, 0x13, 0x0c,
+    0x13, 0x08, 0x0f, 0x09, 0x77, 0x0e, 0x1f, 0x09, 0x0e, 0x77, 0x1c, 0x13,
+    0x16, 0x1f, 0x7b, 0x7e, 0x12, 0x71, 0x12, 0x70,
+};
+_Static_assert(EICAR_SIZE <= FAKE_DISK_BLOCK_SIZE, "EICAR must fit in one sector");
+#endif
 
 #define VOLUME_LABEL "STING TEST " // exactly 11 characters
 
@@ -74,6 +98,12 @@ static void fat_sector(uint8_t *b)
     b[2] = 0xFF;
     b[3] = 0xFF;
     b[4] = 0x0F;
+#if EICAR_ENABLED
+    // Cluster 3 (EICAR.COM) end-of-chain. FAT12 packs two clusters per 3 bytes:
+    // cluster 2 -> bytes 3-4 (low nibble of b[4]), cluster 3 -> bytes 4-5.
+    b[4] |= 0xF0;
+    b[5] = 0xFF;
+#endif
 }
 
 static void dir_entry(uint8_t *e, const char *name11, uint8_t attr, uint16_t cluster, uint32_t size)
@@ -91,24 +121,41 @@ static void root_dir_sector(uint8_t *b)
 {
     dir_entry(b, VOLUME_LABEL, 0x08, 0, 0);                    // volume label
     dir_entry(b + 32, "README  TXT", 0x21, 2, README_SIZE);    // read-only + archive
+#if EICAR_ENABLED
+    dir_entry(b + 64, "EICAR   COM", 0x21, 3, EICAR_SIZE);     // read-only + archive
+#endif
 }
+
+#if EICAR_ENABLED
+static void eicar_sector(uint8_t *b)
+{
+    for (int i = 0; i < EICAR_SIZE; i++) {
+        b[i] = (uint8_t)(EICAR_X[i] ^ EICAR_KEY);
+    }
+}
+#endif
 
 void fake_disk_read_block(uint32_t lba, uint8_t *block)
 {
     memset(block, 0, FAKE_DISK_BLOCK_SIZE);
     switch (lba) {
-    case 0:
+    case FAKE_DISK_LBA_BOOT:
         boot_sector(block);
         break;
-    case 1:
+    case FAKE_DISK_LBA_FAT:
         fat_sector(block);
         break;
-    case 2:
+    case FAKE_DISK_LBA_ROOTDIR:
         root_dir_sector(block);
         break;
-    case 3:
+    case FAKE_DISK_LBA_FILE:
         memcpy(block, README, README_SIZE);
         break;
+#if EICAR_ENABLED
+    case FAKE_DISK_LBA_EICAR:
+        eicar_sector(block);
+        break;
+#endif
     default:
         break;
     }
