@@ -104,13 +104,18 @@ the keyboard accepted, and the per-stage detail shows which.
 | Command | Action |
 |---|---|
 | `report` | print all sessions |
+| `last` | print only the most recent session |
 | `clear` | wipe the log |
 | `label <name>` | tag the next session, e.g. `label FDS-USB1` (max 31 characters) |
 | `help` | list commands |
 
+The log keeps the newest 200 sessions; once full, the oldest is dropped to make
+room, so recording never stops.
+
 ## Report contents (per session)
 
-- Session number and label
+- Session number and label, and a real date/time when a phone set the clock
+  (see the WiFi live read)
 - Each stage reached, with its time since tester power-up
 - Descriptor types requested, with counts
 - Whether storage was read, how many sectors, and which sectors (boot /
@@ -175,9 +180,15 @@ access point so you can watch a test live from a phone, without the laptop:
 2. Open **`http://sting.local/`** (Apple devices and most desktops) or
    **`http://192.168.4.1/`** (works everywhere, including Android).
 
-The page shows the current test updating every second - the stages lighting
-up, the verdict, the sectors read - and links to the full stored report in the
-same text as the UART console. It is a closed point-to-point link: the board is
+The page shows the current test updating every second - a big verdict banner
+(ACTIVE / ENUMERATES / DISABLED / WAITING / LAPTOP), the stages lighting up,
+the sectors read - and links to the full stored report in the same text as the
+UART console.
+
+While the page is open, your phone also quietly sends its clock to the board,
+so that session gets a real local **date and time** in the report. The board
+has no clock of its own and is unpowered between tests, so sessions tested with
+no phone connected show relative times (`t+…`) and a session number only. It is a closed point-to-point link: the board is
 the access point and nothing is routed to any other network. The radio comes up
 ~1.5 s after USB so it never disturbs the first enumeration.
 

@@ -16,6 +16,7 @@
 #if WIFI_READ_ENABLED
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "esp_event.h"
@@ -39,35 +40,82 @@ static char s_tmp[512];
 // ---------------------------------------------------------------------------
 
 static const char PAGE_HTML[] =
-    "<!doctype html><html><head><meta charset=utf-8>"
+    "<!doctype html><html lang=en><head><meta charset=utf-8>"
     "<meta name=viewport content=\"width=device-width,initial-scale=1\">"
     "<title>STING live</title><style>"
-    "body{margin:0;background:#111;color:#ddd;font-family:system-ui,sans-serif}"
-    "#banner{padding:16px;font-size:20px;font-weight:700;color:#fff;background:#555;text-align:center}"
-    "#sub{padding:6px 12px;font-size:13px;color:#aaa;text-align:center}"
-    "pre{margin:0;padding:12px;white-space:pre-wrap;word-break:break-word;"
-    "font-family:ui-monospace,Consolas,monospace;font-size:12px;line-height:1.35}"
-    "a.btn{display:block;margin:12px;padding:12px;text-align:center;background:#246;"
-    "color:#fff;text-decoration:none;border-radius:8px;font-weight:600}"
-    "</style></head><body>"
-    "<div id=banner>connecting...</div>"
-    "<div id=sub>live view - refreshes every second</div>"
-    "<pre id=out>loading...</pre>"
+    ":root{--bg:#0f1115;--card:#171a21;--fg:#e8edf4;--mut:#93a1b3;--line:#262b34}"
+    "*{box-sizing:border-box}"
+    "body{margin:0;background:var(--bg);color:var(--fg);"
+    "font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.5}"
+    ".wrap{max-width:680px;margin:0 auto;padding:0 14px 32px}"
+    "#banner{position:sticky;top:0;margin:0 -14px;padding:22px 16px;text-align:center;"
+    "font-size:30px;font-weight:800;letter-spacing:.5px;color:#fff;background:#3a4150;"
+    "box-shadow:0 2px 10px rgba(0,0,0,.4)}"
+    "#binfo{font-size:14px;font-weight:600;opacity:.92;margin-top:4px}"
+    "#status{display:flex;align-items:center;justify-content:center;gap:8px;"
+    "padding:10px;color:var(--mut);font-size:13px}"
+    "#dot{width:9px;height:9px;border-radius:50%;background:#3fb950;"
+    "box-shadow:0 0 0 0 rgba(63,185,80,.6);animation:p 2s infinite}"
+    "@keyframes p{0%{box-shadow:0 0 0 0 rgba(63,185,80,.5)}70%{box-shadow:0 0 0 10px rgba(63,185,80,0)}"
+    "100%{box-shadow:0 0 0 0 rgba(63,185,80,0)}}"
+    "#dot.stale{background:#d29922;animation:none}"
+    ".card{background:var(--card);border:1px solid var(--line);border-radius:12px;"
+    "padding:10px 14px;margin:10px 0}"
+    ".ln{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;"
+    "white-space:pre-wrap;word-break:break-word;padding:2px 0}"
+    ".ses{font-weight:800;font-size:16px;color:#fff;margin:4px 0 8px;"
+    "font-family:system-ui,sans-serif;border-bottom:1px solid var(--line);padding-bottom:6px}"
+    ".yes{color:#7ee2a8}.yes b{color:#fff}"
+    ".no{color:#6b7684}"
+    ".detail{color:var(--mut);font-size:12px;padding-left:4px}"
+    ".note{color:#e3b341}"
+    ".verdict{font-weight:800;font-size:15px;color:#fff;background:#222833;"
+    "border-radius:8px;padding:10px 12px;margin:8px 0;font-family:system-ui,sans-serif}"
+    "a.btn{display:block;margin:14px 0 0;padding:14px;text-align:center;background:#1f6feb;"
+    "color:#fff;text-decoration:none;border-radius:10px;font-weight:700;font-size:15px}"
+    ".hint{color:var(--mut);font-size:12px;text-align:center;margin-top:14px}"
+    "</style></head><body><div class=wrap>"
+    "<div id=banner>Connecting<div id=binfo>&nbsp;</div></div>"
+    "<div id=status><span id=dot></span><span id=upd>starting live view...</span></div>"
+    "<div class=card id=out>Loading...</div>"
     "<a class=btn href=\"/report\">Open full stored report</a>"
+    "<div class=hint>Network: STING &middot; sting.local or 192.168.4.1 &middot; refreshes every second</div>"
     "<script>"
-    "var M={ACTIVE:['#0a7a28','fully live'],ENUMERATES:['#b8860b','logically live'],"
-    "DISABLED:['#a00','disabled']};"
-    "async function tick(){try{"
-    "var r=await fetch('/live',{cache:'no-store'});var t=await r.text();"
-    "document.getElementById('out').textContent=t;"
-    "var m=t.match(/VERDICT:\\s*(\\w+)/);var v=m?m[1]:'';var b=document.getElementById('banner');"
-    "if(M[v]){b.style.background=M[v][0];b.textContent=v+' - '+M[v][1];}"
-    "else if(t.indexOf('laptop')>=0){b.style.background='#246';b.textContent='LAPTOP MODE';}"
-    "else{b.style.background='#555';b.textContent='waiting for a port...';}"
-    "}catch(e){document.getElementById('banner').textContent='disconnected';"
-    "document.getElementById('banner').style.background='#555';}}"
-    "setInterval(tick,1000);tick();"
-    "</script></body></html>";
+    "var M={ACTIVE:['#1a7f37','FULLY LIVE - configured, storage and/or keyboard accepted'],"
+    "ENUMERATES:['#9e6a03','LOGICALLY LIVE - descriptors requested, no driver bound'],"
+    "DISABLED:['#b22','DISABLED - powered, no enumeration in the window']};"
+    "function esc(s){return s.replace(/[&<>]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});}"
+    "function cls(l){"
+    "if(/^\\s*VERDICT:/.test(l))return'verdict';"
+    "if(/^---/.test(l)||/^===/.test(l))return'ses';"
+    "if(/^\\s*note:/.test(l))return'note';"
+    "if(/\\bYES\\b/.test(l))return'yes';"
+    "if(/^\\s*[1-6]\\s+\\S.*\\bno\\s*$/.test(l))return'no';"
+    "if(/^\\s{6,}\\S/.test(l))return'detail';"
+    "return'ln';}"
+    "function render(t){var o='';var a=t.split('\\n');for(var i=0;i<a.length;i++){"
+    "var l=a[i];if(l.trim()==='')continue;var c=cls(l);"
+    "var h=esc(l).replace(/\\bYES\\b/,'<b>YES</b>');"
+    "o+='<div class=\"ln '+c+'\">'+h+'</div>';}return o;}"
+    "var last=0;"
+    "async function tick(){var b=document.getElementById('banner'),bi=document.getElementById('binfo'),"
+    "dot=document.getElementById('dot'),upd=document.getElementById('upd');try{"
+    "var q='?e='+Math.floor(Date.now()/1000)+'&z='+(-new Date().getTimezoneOffset());"
+    "var r=await fetch('/live'+q,{cache:'no-store'});var t=await r.text();"
+    "document.getElementById('out').innerHTML=render(t);"
+    "var m=t.match(/VERDICT:\\s*(\\w+)/);var v=m?m[1]:'';"
+    "if(M[v]){b.style.background=M[v][0];b.firstChild.textContent=v;bi.textContent=M[v][1];}"
+    "else if(t.indexOf('LAPTOP')>=0){b.style.background='#1f6feb';b.firstChild.textContent='LAPTOP MODE';"
+    "bi.textContent='reading reports - not testing a port';}"
+    "else{b.style.background='#3a4150';b.firstChild.textContent='WAITING';"
+    "bi.textContent='plug the USB port into a port to test';}"
+    "last=Date.now();dot.className='';upd.textContent='live - updated just now';"
+    "}catch(e){dot.className='stale';upd.textContent='disconnected - is WiFi STING still joined?';}}"
+    "setInterval(tick,1000);"
+    "setInterval(function(){if(last&&Date.now()-last>3000){"
+    "document.getElementById('dot').className='stale';}},1000);"
+    "tick();"
+    "</script></div></body></html>";
 
 // ---------------------------------------------------------------------------
 // Handlers
@@ -79,9 +127,33 @@ static esp_err_t root_get(httpd_req_t *req)
     return httpd_resp_send(req, PAGE_HTML, HTTPD_RESP_USE_STRLEN);
 }
 
+// Pick up the phone's clock from ?e=<epoch seconds>&z=<tz offset minutes>.
+static void absorb_time_query(httpd_req_t *req)
+{
+    size_t qlen = httpd_req_get_url_query_len(req) + 1;
+    if (qlen <= 1 || qlen > sizeof(s_tmp)) {
+        return;
+    }
+    if (httpd_req_get_url_query_str(req, s_tmp, qlen) != ESP_OK) {
+        return;
+    }
+    char ev[16];
+    char zv[12];
+    if (httpd_query_key_value(s_tmp, "e", ev, sizeof(ev)) != ESP_OK) {
+        return;
+    }
+    uint32_t epoch = (uint32_t)strtoul(ev, NULL, 10);
+    int16_t tz = 0;
+    if (httpd_query_key_value(s_tmp, "z", zv, sizeof(zv)) == ESP_OK) {
+        tz = (int16_t)atoi(zv);
+    }
+    session_set_wallclock(epoch, tz);
+}
+
 static esp_err_t live_get(httpd_req_t *req)
 {
     session_rec_t rec;
+    absorb_time_query(req);
     httpd_resp_set_type(req, "text/plain");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
 

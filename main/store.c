@@ -1,3 +1,10 @@
+// Session log in flash (NVS), as a ring buffer.
+//
+// Sessions are keyed by an absolute, ever-increasing number. The log keeps the
+// newest MAX_SESSIONS; once full, the oldest is dropped to make room, so
+// recording never stops. "first" is the number of the oldest kept session and
+// "next" is the number the next new session will get, so count = next - first.
+
 #include "store.h"
 
 #include <stdio.h>
@@ -7,16 +14,18 @@
 #include "nvs_flash.h"
 
 #define NS        "sting"
-#define KEY_COUNT "count"
+#define KEY_FIRST "first"
+#define KEY_NEXT  "next"
 #define KEY_LABEL "label"
 
 static nvs_handle_t s_nvs;
 static bool s_open;
-static uint16_t s_count;
+static uint32_t s_first = 1; // oldest kept session number
+static uint32_t s_next = 1;  // number for the next new session
 
-static void session_key(uint16_t number, char key[8])
+static void session_key(uint32_t number, char key[16])
 {
-    snprintf(key, 8, "s%04u", (unsigned)number);
+    snprintf(key, 16, "s%u", (unsigned)number);
 }
 
 static esp_err_t open_namespace(void)
@@ -26,12 +35,19 @@ static esp_err_t open_namespace(void)
         return err;
     }
     s_open = true;
-    s_count = 0;
-    err = nvs_get_u16(s_nvs, KEY_COUNT, &s_count);
-    if (err == ESP_ERR_NVS_NOT_FOUND) {
-        err = ESP_OK;
+    s_first = 1;
+    s_next = 1;
+    uint32_t v;
+    if (nvs_get_u32(s_nvs, KEY_FIRST, &v) == ESP_OK) {
+        s_first = v;
     }
-    return err;
+    if (nvs_get_u32(s_nvs, KEY_NEXT, &v) == ESP_OK) {
+        s_next = v;
+    }
+    if (s_next < s_first) { // corrupt counters: treat as empty, do not wipe data
+        s_first = s_next;
+    }
+    return ESP_OK;
 }
 
 esp_err_t store_init(void)
@@ -47,16 +63,22 @@ esp_err_t store_init(void)
 
 uint16_t store_count(void)
 {
-    return s_count;
+    return (uint16_t)(s_next - s_first);
 }
 
-bool store_read(uint16_t number, session_rec_t *out)
+uint16_t store_next_number(void)
 {
-    if (!s_open || number == 0 || number > s_count) {
+    return (uint16_t)s_next;
+}
+
+bool store_read(uint16_t ordinal, session_rec_t *out)
+{
+    // ordinal is 1..count, oldest first.
+    if (!s_open || ordinal == 0 || ordinal > store_count()) {
         return false;
     }
-    char key[8];
-    session_key(number, key);
+    char key[16];
+    session_key(s_first + ordinal - 1, key);
     size_t len = sizeof(*out);
     memset(out, 0, sizeof(*out));
     if (nvs_get_blob(s_nvs, key, out, &len) != ESP_OK) {
@@ -65,10 +87,10 @@ bool store_read(uint16_t number, session_rec_t *out)
     return len == sizeof(*out) && out->version == SESSION_REC_VERSION && out->size == sizeof(*out);
 }
 
-static esp_err_t write_record(const session_rec_t *rec)
+static esp_err_t write_record(uint32_t number, const session_rec_t *rec)
 {
-    char key[8];
-    session_key(rec->number, key);
+    char key[16];
+    session_key(number, key);
     esp_err_t err = nvs_set_blob(s_nvs, key, rec, sizeof(*rec));
     if (err != ESP_OK) {
         return err;
@@ -81,21 +103,27 @@ esp_err_t store_begin(session_rec_t *rec)
     if (!s_open) {
         return ESP_ERR_INVALID_STATE;
     }
-    if (s_count >= MAX_SESSIONS) {
-        return ESP_ERR_NO_MEM;
+    // Make room by evicting the oldest, so recording never stops.
+    while (store_count() >= MAX_SESSIONS) {
+        char key[16];
+        session_key(s_first, key);
+        nvs_erase_key(s_nvs, key);
+        s_first++;
+        nvs_set_u32(s_nvs, KEY_FIRST, s_first);
     }
-    rec->number = s_count + 1;
+
+    rec->number = (uint16_t)s_next;
     store_get_label(rec->label, sizeof(rec->label));
 
-    esp_err_t err = write_record(rec);
+    esp_err_t err = write_record(s_next, rec);
     if (err != ESP_OK) {
         return err;
     }
-    err = nvs_set_u16(s_nvs, KEY_COUNT, rec->number);
+    err = nvs_set_u32(s_nvs, KEY_NEXT, s_next + 1);
     if (err != ESP_OK) {
         return err;
     }
-    s_count = rec->number;
+    s_next++;
     if (rec->label[0] != '\0') {
         nvs_erase_key(s_nvs, KEY_LABEL); // the label is used up
     }
@@ -104,22 +132,23 @@ esp_err_t store_begin(session_rec_t *rec)
 
 esp_err_t store_update(const session_rec_t *rec)
 {
-    if (!s_open || rec->number == 0 || rec->number > s_count) {
+    // The newest session is the only one still being written to.
+    if (!s_open || s_next == s_first || rec->number != (uint16_t)(s_next - 1)) {
         return ESP_ERR_INVALID_STATE;
     }
-    return write_record(rec);
+    return write_record(s_next - 1, rec);
 }
 
 esp_err_t store_drop(const session_rec_t *rec)
 {
-    if (!s_open || rec->number == 0 || rec->number != s_count) {
+    if (!s_open || s_next == s_first || rec->number != (uint16_t)(s_next - 1)) {
         return ESP_ERR_INVALID_STATE;
     }
-    char key[8];
-    session_key(rec->number, key);
+    char key[16];
+    session_key(s_next - 1, key);
     nvs_erase_key(s_nvs, key);
-    s_count = rec->number - 1;
-    esp_err_t err = nvs_set_u16(s_nvs, KEY_COUNT, s_count);
+    s_next--;
+    esp_err_t err = nvs_set_u32(s_nvs, KEY_NEXT, s_next);
     if (err == ESP_OK && rec->label[0] != '\0') {
         err = nvs_set_str(s_nvs, KEY_LABEL, rec->label); // hand the label back
     }
@@ -135,7 +164,8 @@ esp_err_t store_clear(void)
         nvs_close(s_nvs);
         s_open = false;
     }
-    s_count = 0;
+    s_first = 1;
+    s_next = 1;
     // Erase the whole partition so nothing of the old log survives, and so a
     // damaged partition becomes usable again.
     nvs_flash_deinit();

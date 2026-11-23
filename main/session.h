@@ -61,17 +61,23 @@ typedef struct {
     uint8_t marker_sent;     // keys the host actually collected
 } observation_t;
 
-#define SESSION_REC_VERSION 2
+#define SESSION_REC_VERSION 3
 
 // One stored session (NVS blob).
 typedef struct {
     uint16_t version;
     uint16_t size;
-    uint16_t number;      // 1-based session number
+    uint16_t number;      // absolute session number
     uint8_t window_done;  // 1 once the observation window had fully elapsed
     uint8_t reserved;
     uint32_t t_saved;     // uptime when this record was last written
     uint32_t window_ms;
+    // Real wall-clock time at power-up (t+0), as Unix epoch seconds UTC, set by
+    // a phone over WiFi. 0 = unknown (then only relative times are available).
+    // tz_off_min is the phone's timezone offset east of UTC, in minutes.
+    uint32_t epoch_base;
+    int16_t tz_off_min;
+    uint16_t reserved2;
     char label[LABEL_MAX];
     char fw[12];
     observation_t obs;
@@ -114,3 +120,9 @@ bool session_is_cli_mode(void);
 // Fill `out` with the current session built from the live observations.
 // Returns false in CLI/laptop mode, where no port test is in progress.
 bool session_live_snapshot(session_rec_t *out);
+
+// Set the real wall-clock time from a connected client (the WiFi page):
+// `epoch` is current Unix time in seconds UTC, `tz_off_min` the client's
+// timezone offset east of UTC in minutes. The current session is then stamped
+// with the computed power-up time so the report can show a real date.
+void session_set_wallclock(uint32_t epoch, int16_t tz_off_min);

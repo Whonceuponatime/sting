@@ -179,12 +179,20 @@ solid distinction is the signal that the result is safely written to flash.
 
 Each plug-in is one **session**. The observations are written to the chip's
 internal flash (an NVS partition), so a result survives being unplugged and
-carried back to the laptop. The log holds up to 200 sessions.
+carried back to the laptop. The log keeps the newest **200 sessions**; once
+full, the oldest is dropped so recording never stops (a ring buffer). Each
+session has an absolute number that only increases, so order is unambiguous.
 
-Because the board has no real-time clock, all times are **relative to
-power-up** (e.g. "t+0.498 s"). The operator records the date and the port name
-separately; the `label` command tags a session with a port name
-(e.g. `FDS-USB1`) so the two can be matched later.
+Because the board has no real-time clock, all internal times are **relative to
+power-up** (e.g. "t+0.498 s"). A real date/time is available only when a phone,
+connected to the WiFi live read during a test, sends its clock to the board;
+that session is then stamped with a real local date and time (section 10).
+Without a phone, the operator records the date separately and uses the `label`
+command to tag a session with a port name (e.g. `FDS-USB1`).
+
+The `last` console command prints only the most recent session, and the WiFi
+live view always shows just the current one, so neither requires scrolling
+through the whole log.
 
 Writing to flash is scheduled carefully: a flash write briefly stalls USB
 interrupt handling, so the firmware saves a changed session only once the bus
@@ -279,6 +287,11 @@ WiFi access point**. A phone joins that network and opens `http://192.168.4.1/`
 in a browser, which shows the current test updating live (the stages lighting
 up, the verdict, the sectors read) and links to the full stored report in the
 same text form as the UART console.
+
+While the page is open, the phone also sends its own clock to the board (its
+browser knows the real time), so the session being viewed is stamped with a
+real local date and time in the report - the board's only source of wall-clock
+time, since it has no battery clock and is unpowered between tests.
 
 This is a closed, point-to-point link: the tester *is* the access point, and
 nothing is routed to any other network. The radio:

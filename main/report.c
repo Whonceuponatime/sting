@@ -7,6 +7,7 @@
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <time.h>
 
 #include "fake_disk.h"
 
@@ -52,6 +53,30 @@ static const char *yes_no(bool v)
 static const char *fmt_time(uint32_t t_ms, char buf[24])
 {
     snprintf(buf, 24, "t+%lu.%03lu s", (unsigned long)(t_ms / 1000), (unsigned long)(t_ms % 1000));
+    return buf;
+}
+
+// Real local time of an event, given the session's power-up epoch and the
+// client's timezone offset: "2026-11-24 14:30:55 (UTC+09:00)". Empty if the
+// clock was never set for this session.
+static const char *fmt_wall(uint32_t epoch_base, int16_t tz_off_min, uint32_t t_ms, char buf[64])
+{
+    buf[0] = '\0';
+    if (epoch_base == 0) {
+        return buf;
+    }
+    time_t local = (time_t)epoch_base + (time_t)tz_off_min * 60 + (time_t)(t_ms / 1000);
+    struct tm *tm = gmtime(&local); // offset already folded in, so gmtime == local
+    char when[24] = "unknown";
+    if (tm != NULL) {
+        strftime(when, sizeof(when), "%Y-%m-%d %H:%M:%S", tm);
+    }
+    int off = tz_off_min;
+    char sign = off < 0 ? '-' : '+';
+    if (off < 0) {
+        off = -off;
+    }
+    snprintf(buf, 64, "%s (UTC%c%02d:%02d)", when, sign, off / 60, off % 60);
     return buf;
 }
 
@@ -132,6 +157,13 @@ static void render_session(const session_rec_t *r)
         emit("  [%s]", r->label);
     }
     emit(" ---\n");
+
+    char wb[64];
+    if (r->epoch_base != 0) {
+        emit("  when            %s\n", fmt_wall(r->epoch_base, r->tz_off_min, 0, wb));
+    } else {
+        emit("  when            clock not set for this session (relative times only)\n");
+    }
 
     if (r->window_done) {
         emit("  observed        %lu s window complete (last update %s)\n",

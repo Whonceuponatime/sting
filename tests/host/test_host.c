@@ -190,6 +190,8 @@ int main(int argc, char **argv)
     active.obs.hid_reports = 25;
     active.obs.marker_sent = 12;
     active.obs.t_marker_done = 2900;
+    active.epoch_base = 1764000000u; // a real power-up time was set over WiFi
+    active.tz_off_min = 540;          // UTC+09:00
     CHECK(session_verdict(&active.obs) == VERDICT_ACTIVE);
     CHECK(active.obs.msc_lba_read_mask & (1u << FAKE_DISK_LBA_FILE));   // file read seen
     CHECK(active.obs.msc_lba_read_mask & (1u << FAKE_DISK_LBA_ROOTDIR)); // dir read seen

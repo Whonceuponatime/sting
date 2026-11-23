@@ -23,6 +23,9 @@ static session_rec_t s_rec;
 static bool s_recorded;  // s_rec exists in the log
 static bool s_cli_mode;  // a laptop is on the UART port: not a port test
 static bool s_store_fault;
+static uint32_t s_boot_epoch;  // Unix time at t+0 (0 = unknown), set over WiFi
+static int16_t s_tz_off_min;   // timezone offset east of UTC, in minutes
+static bool s_time_dirty;      // wall clock newly set: re-save the session
 
 void session_enter_cli_mode(void)
 {
@@ -42,6 +45,24 @@ bool session_is_cli_mode(void)
     return s_cli_mode;
 }
 
+void session_set_wallclock(uint32_t epoch, int16_t tz_off_min)
+{
+    if (epoch < 1700000000u) { // sanity: before ~2023 is not a real clock
+        return;
+    }
+    uint32_t uptime_s = probe_now_ms() / 1000;
+    uint32_t boot_epoch = (epoch > uptime_s) ? epoch - uptime_s : 0;
+
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    // Set once per power-up; ignore later refreshes so the anchor stays stable.
+    if (s_boot_epoch == 0 && boot_epoch != 0) {
+        s_boot_epoch = boot_epoch;
+        s_tz_off_min = tz_off_min;
+        s_time_dirty = true; // make persist() stamp the session
+    }
+    xSemaphoreGive(s_mutex);
+}
+
 // Build the current session from the live observations, so the WiFi live read
 // shows exactly what the UART report would. Returns false in CLI/laptop mode,
 // where there is no port test in progress.
@@ -54,10 +75,12 @@ bool session_live_snapshot(session_rec_t *out)
     memset(out, 0, sizeof(*out));
     out->version = SESSION_REC_VERSION;
     out->size = sizeof(*out);
-    out->number = (uint16_t)(store_count() + 1); // provisional number
     out->window_done = now >= OBSERVE_WINDOW_MS;
     out->window_ms = OBSERVE_WINDOW_MS;
     out->t_saved = now;
+    out->epoch_base = s_boot_epoch;
+    out->tz_off_min = s_tz_off_min;
+    out->number = store_next_number(); // provisional number
     strlcpy(out->fw, STING_VERSION, sizeof(out->fw));
     store_get_label(out->label, sizeof(out->label));
     probe_snapshot(&out->obs, NULL, NULL);
@@ -82,10 +105,13 @@ static void persist(uint32_t now)
     bool closing = window_done && !s_rec.window_done; // the verdict becomes final now
 
     // Nothing is logged until the host does something or the window closes.
-    if (generation == 0 && !window_done) {
+    // A newly-set clock only updates a session that already exists; it never
+    // creates one for a still-silent port.
+    bool stamp = s_time_dirty && s_recorded;
+    if (generation == 0 && !window_done && !stamp) {
         return;
     }
-    if (generation == saved_generation && s_recorded && !closing) {
+    if (generation == saved_generation && s_recorded && !closing && !stamp) {
         dirty = false;
         return;
     }
@@ -95,8 +121,8 @@ static void persist(uint32_t now)
     }
 
     bool due;
-    if (closing) {
-        due = true;
+    if (closing || stamp) {
+        due = true; // final verdict, or a freshly-set clock to record
     } else if (s_rec.window_done) {
         due = now - last_save >= SAVE_POST_WINDOW_MS && saves < SAVE_MAX_PER_SESSION;
     } else {
@@ -111,6 +137,8 @@ static void persist(uint32_t now)
     s_rec.window_done = window_done;
     s_rec.window_ms = OBSERVE_WINDOW_MS;
     s_rec.t_saved = now;
+    s_rec.epoch_base = s_boot_epoch;
+    s_rec.tz_off_min = s_tz_off_min;
     strlcpy(s_rec.fw, STING_VERSION, sizeof(s_rec.fw));
     s_rec.obs = obs;
 
@@ -125,6 +153,7 @@ static void persist(uint32_t now)
     last_save = now;
     saves++;
     dirty = false;
+    s_time_dirty = false;
 }
 
 static void show_led(uint32_t now)

@@ -31,7 +31,8 @@ static void cmd_report(void)
     printf("firmware : sting %s (built %s %s)\n", STING_VERSION, __DATE__, __TIME__);
     printf("tester   : USB %04x:%04x \"%s\" serial %s\n", USB_VID, USB_PID, USB_PRODUCT, probe_serial());
     printf("window   : %d s observation per session\n", OBSERVE_WINDOW_MS / 1000);
-    printf("times    : seconds since tester power-up (the tester has no real-time clock)\n");
+    printf("times    : t+ values are seconds since power-up; a real date is shown per\n");
+    printf("           session when a phone set the clock over WiFi\n");
     printf("sessions : %u\n", (unsigned)count);
     if (!s_store_ok) {
         printf("WARNING  : the session log could not be opened at boot; run `clear` to reinitialise it\n");
@@ -57,10 +58,26 @@ static void cmd_report(void)
 // Commands
 // ---------------------------------------------------------------------------
 
+static void cmd_last(void)
+{
+    static session_rec_t rec;
+    uint16_t count = store_count();
+    if (count == 0) {
+        printf("no sessions stored\n");
+        return;
+    }
+    if (store_read(count, &rec)) { // highest ordinal = newest
+        report_print_session(&rec);
+    } else {
+        printf("\n--- newest session ---\n  (record unreadable or from a different firmware version)\n");
+    }
+}
+
 static void print_help(void)
 {
     printf("commands:\n"
            "  report         print all stored sessions\n"
+           "  last           print only the most recent session\n"
            "  clear          wipe all stored sessions\n"
            "  label <name>   tag the next session, e.g. label FDS-USB1\n"
            "  help           show this list\n");
@@ -131,11 +148,12 @@ static void run_line(char *line)
     }
 
     bool is_report = strcmp(line, "report") == 0;
+    bool is_last = strcmp(line, "last") == 0;
     bool is_clear = strcmp(line, "clear") == 0;
     bool is_label = strcmp(line, "label") == 0;
     bool is_help = strcmp(line, "help") == 0 || strcmp(line, "?") == 0;
 
-    if (!(is_report || is_clear || is_label || is_help)) {
+    if (!(is_report || is_last || is_clear || is_label || is_help)) {
         printf("unknown command: %s (type help)\n", line);
         return;
     }
@@ -146,6 +164,8 @@ static void run_line(char *line)
 
     if (is_report) {
         cmd_report();
+    } else if (is_last) {
+        cmd_last();
     } else if (is_clear) {
         cmd_clear();
     } else if (is_label) {

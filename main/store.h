@@ -14,8 +14,12 @@ esp_err_t store_init(void);
 // Number of sessions currently stored.
 uint16_t store_count(void);
 
-// Read session `number` (1..store_count()). False if missing or unreadable.
-bool store_read(uint16_t number, session_rec_t *out);
+// The absolute number the next new session will be given.
+uint16_t store_next_number(void);
+
+// Read the `ordinal`-th stored session (1..store_count(), oldest first).
+// False if missing or unreadable.
+bool store_read(uint16_t ordinal, session_rec_t *out);
 
 // Append a new session: assigns rec->number and attaches the pending label.
 // ESP_ERR_NO_MEM when the log already holds MAX_SESSIONS sessions.
