@@ -132,6 +132,20 @@ static void test_fake_disk(const char *image_path)
         }
     }
 
+
+#if EICAR_ENABLED
+    // The RAM volume is writable: a host (antivirus) can delete EICAR, and the
+    // volume regenerates on fake_disk_init().
+    CHECK(fake_disk_eicar_present());
+    uint8_t dir[FAKE_DISK_BLOCK_SIZE];
+    fake_disk_read_block(FAKE_DISK_LBA_ROOTDIR, dir);
+    dir[64] = 0xE5; // FAT "deleted" marker on the EICAR entry
+    fake_disk_write_block(FAKE_DISK_LBA_ROOTDIR, dir);
+    CHECK(!fake_disk_eicar_present());        // deletion observed
+    fake_disk_init();                          // every boot regenerates it
+    CHECK(fake_disk_eicar_present());          // EICAR is back
+#endif
+
     // NOTE: writing the image to a file is deliberately skipped here when EICAR
     // is enabled - a file holding the real signature would be quarantined by an
     // antivirus on the build machine. The in-memory checks above are enough.
@@ -190,8 +204,12 @@ int main(int argc, char **argv)
     active.obs.hid_reports = 25;
     active.obs.marker_sent = 12;
     active.obs.t_marker_done = 2900;
-    active.epoch_base = 1764000000u; // a real power-up time was set over WiFi
-    active.tz_off_min = 540;          // UTC+09:00
+    active.obs.t_msc_write = 3200;
+    active.obs.msc_write_attempts = 2;
+    active.obs.msc_write_lba_mask = (1u << FAKE_DISK_LBA_ROOTDIR);
+    active.obs.t_eicar_removed = 3300; // host antivirus deleted EICAR.COM
+    active.epoch_base = 1764000000u;   // a real power-up time was set over WiFi
+    active.tz_off_min = 540;           // UTC+09:00
     CHECK(session_verdict(&active.obs) == VERDICT_ACTIVE);
     CHECK(active.obs.msc_lba_read_mask & (1u << FAKE_DISK_LBA_FILE));   // file read seen
     CHECK(active.obs.msc_lba_read_mask & (1u << FAKE_DISK_LBA_ROOTDIR)); // dir read seen

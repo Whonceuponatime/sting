@@ -108,7 +108,7 @@ reached is a clean measure of how live the port is.
 When the probe is plugged in, the system under test sees an ordinary
 **composite USB device** - one physical device offering two functions:
 
-- **A small USB flash drive.** An 8 KB, read-only FAT12 volume labelled
+- **A small USB flash drive.** An 8 KB FAT12 volume labelled
   `STING TEST`. It is generated on the fly in the chip; nothing is ever written
   to it. It holds a plain-text `README.TXT` explaining what the device is, and
   optionally an antivirus test file (section 9).
@@ -268,12 +268,14 @@ and on the WiFi page, without opening anything on the host:
 
 - **The host read the EICAR sector.** Something on the host read the file's
   bytes (a scan or indexing).
-- **The host tried to write/delete on the volume.** The drive is read-only, so
-  when antivirus tries to *quarantine* `EICAR.COM` it issues a write that the
-  board refuses - and records. A read of EICAR followed by a write attempt is
-  the passive signature of antivirus quarantine. (Windows also writes volume
-  metadata to removable drives, so a write attempt on its own is reported as a
-  fact, not proof of antivirus.)
+- **The host deleted the EICAR file.** The volume is writable in RAM, so when
+  antivirus *quarantines* `EICAR.COM` it actually removes the directory entry;
+  the board sees the entry disappear and reports a prominent
+  `*** ANTIVIRUS QUARANTINE ***` result - definitive evidence the host's AV
+  found and removed it. (Windows also writes volume metadata such as
+  `System Volume Information`, so writes that do not remove EICAR are reported
+  as plain writes, not antivirus.) Nothing is saved to flash; the volume is
+  regenerated with EICAR present on the next boot.
 
 The limit of passive detection: it only catches antivirus that scans
 **automatically** on insertion or access. If the host scans only when a user
@@ -367,7 +369,7 @@ These are deliberately listed so results are not over-read:
 |---|---|
 | `main/main.c` | session loop: when to save, LED state, laptop-vs-test logic |
 | `main/usb_probe.c` | the USB device (TinyUSB) and every observation it records |
-| `main/fake_disk.c` | the read-only FAT12 volume, README and EICAR |
+| `main/fake_disk.c` | the RAM FAT12 volume (writable, regenerated each boot), README and EICAR |
 | `main/store.c` | the session log in flash (NVS) |
 | `main/report.c` | the report text (shared by the UART console and WiFi) |
 | `main/cli.c` | the UART console commands |

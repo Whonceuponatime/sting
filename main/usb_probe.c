@@ -114,9 +114,9 @@ static void note_hid(uint8_t flag)
     UNLOCK();
 }
 
-// The host tried to write/modify the read-only volume (e.g. antivirus trying
-// to quarantine EICAR, or the OS writing metadata). Record it; nothing is ever
-// actually written.
+// The host wrote to the volume (e.g. antivirus quarantining EICAR, or the OS
+// writing metadata). The write is applied to the RAM volume; nothing reaches
+// flash and the volume is regenerated at the next boot.
 static void note_write(uint32_t lba)
 {
     uint32_t now = probe_now_ms();
@@ -128,6 +128,16 @@ static void note_write(uint32_t lba)
     if (lba < 16) {
         s_obs.msc_write_lba_mask |= (uint16_t)(1u << lba);
     }
+    changed(now);
+    UNLOCK();
+}
+
+// The host deleted the EICAR directory entry: its antivirus quarantined it.
+static void note_eicar_removed(void)
+{
+    uint32_t now = probe_now_ms();
+    LOCK();
+    stamp(&s_obs.t_eicar_removed, now);
     changed(now);
     UNLOCK();
 }
@@ -379,17 +389,41 @@ int32_t tud_msc_read10_cb(uint8_t lun, uint32_t lba, uint32_t offset, void *buff
 bool tud_msc_is_writable_cb(uint8_t lun)
 {
     (void)lun;
-    return false; // the fake drive is write-protected
+    // Writable, but only in RAM: the host can delete EICAR (so antivirus
+    // quarantine is observable), and the volume is regenerated at the next boot.
+    return true;
 }
 
 int32_t tud_msc_write10_cb(uint8_t lun, uint32_t lba, uint32_t offset, uint8_t *buffer, uint32_t bufsize)
 {
-    (void)offset;
-    (void)buffer;
-    (void)bufsize;
-    note_write(lba); // host tried to modify the volume; refuse it
-    tud_msc_set_sense(lun, SCSI_SENSE_DATA_PROTECT, 0x27, 0x00); // write protected
-    return -1;
+    (void)lun;
+    static uint8_t block[FAKE_DISK_BLOCK_SIZE];
+    bool had_eicar = fake_disk_eicar_present();
+
+    uint32_t done = 0;
+    while (done < bufsize && lba < FAKE_DISK_BLOCK_COUNT) {
+        uint32_t chunk = FAKE_DISK_BLOCK_SIZE - offset;
+        if (chunk > bufsize - done) {
+            chunk = bufsize - done;
+        }
+        fake_disk_read_block(lba, block);          // read-modify-write the sector
+        memcpy(block + offset, buffer + done, chunk);
+        fake_disk_write_block(lba, block);
+        note_write(lba);
+        done += chunk;
+        offset += chunk;
+        if (offset == FAKE_DISK_BLOCK_SIZE) {
+            offset = 0;
+            lba++;
+        }
+    }
+
+    // If the EICAR entry was present and is now gone, the host's antivirus
+    // quarantined it.
+    if (had_eicar && !fake_disk_eicar_present()) {
+        note_eicar_removed();
+    }
+    return (int32_t)done;
 }
 
 int32_t tud_msc_scsi_cb(uint8_t lun, uint8_t const scsi_cmd[16], void *buffer, uint16_t bufsize)
@@ -643,9 +677,12 @@ void probe_start(void)
     s_obs.t_msc_capacity = T_NONE;
     s_obs.t_msc_read = T_NONE;
     s_obs.t_msc_write = T_NONE;
+    s_obs.t_eicar_removed = T_NONE;
     s_obs.t_marker_done = T_NONE;
     s_obs.t_suspend = T_NONE;
     s_obs.marker_len = marker_key_count();
+
+    fake_disk_init(); // fresh RAM volume every boot (EICAR present again)
 
     uint8_t mac[6] = { 0 };
     if (esp_efuse_mac_get_default(mac) == ESP_OK) {

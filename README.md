@@ -148,9 +148,9 @@ Layout of one session (values illustrative):
 - A composite USB device, `303a:4006`, manufacturer `STING`, product
   `USB Port Liveness Tester`, with the chip's MAC address as serial number.
   It is meant to be easy to find in the host's own device and event logs.
-- A write-protected FAT12 volume `STING TEST` holding a plain-text
-  `README.TXT` and, when `EICAR_ENABLED` is set, `EICAR.COM` (see below).
-  Nothing can be written to it.
+- A FAT12 volume `STING TEST` holding a plain-text `README.TXT` and, when
+  `EICAR_ENABLED` is set, `EICAR.COM` (see below). It is writable in RAM only -
+  nothing is saved to flash, and it is regenerated fresh on every power-up.
 - A keyboard that types `stingusbtest` once, about 1.5 s after the host
   configures it. The marker is limited to `a-z` and `0-9`: no Enter, Tab,
   Space, modifier or function keys.
@@ -164,19 +164,24 @@ software. It is not malware and does nothing if run. It lets you check whether
 the system under test runs antivirus that scans USB media: if it does, reading
 the volume should make it alert on or quarantine the file.
 
-The report shows this **passively**, on the tester itself (and the WiFi page),
-without opening anything on the host:
+The volume is **writable in RAM** (nothing is saved to flash; it is
+regenerated fresh every boot, so EICAR is always back). This lets the host's
+antivirus actually **delete/quarantine** `EICAR.COM`, which the board detects
+and reports - all on the tester and the WiFi page, without opening anything on
+the host:
 
-- whether the host **read** the EICAR sector (something scanned/indexed it), and
-- whether the host **tried to write/delete** on the read-only volume. A read of
-  EICAR followed by a write attempt is the passive signature of antivirus
-  trying to quarantine it. (A write attempt alone can also be the OS writing
-  volume metadata, so it is reported factually.)
+- whether the host **read** the EICAR sector (something scanned/indexed it),
+- whether the host **deleted** the EICAR file - shown as a prominent
+  `*** ANTIVIRUS QUARANTINE ***` line: definitive evidence the host's AV caught
+  and removed it, and
+- otherwise, any other **writes** to the volume (reported factually, since the
+  OS also writes metadata such as `System Volume Information`).
 
-This only catches antivirus that scans **automatically** on insertion/access.
-If the host only scans when a file is opened, nothing is detectable passively -
-then you must open the drive in the host's file manager (which does touch the
-host), and confirm the alert there.
+This passive detection only works if the host scans **automatically** on
+insertion/access. If the host only scans when a file is opened, nothing is
+detectable passively - then you open the drive in the host's file manager
+(which does touch the host) and confirm the alert there. Either way, the EICAR
+file regenerates on the next plug-in.
 
 The string is stored XOR-obfuscated and reconstructed only in RAM when the host
 reads it, so the genuine signature never appears in this firmware image or its
@@ -270,7 +275,7 @@ drives both.
 |---|---|
 | `main/main.c` | session loop: when to save, LED state |
 | `main/usb_probe.c` | USB device (TinyUSB) and everything it observes |
-| `main/fake_disk.c` | the read-only FAT12 test volume, README and EICAR |
+| `main/fake_disk.c` | the RAM FAT12 volume (writable, regenerated each boot), README and EICAR |
 | `main/store.c` | session log in flash (NVS) |
 | `main/cli.c` | UART commands |
 | `main/report.c` | report text (shared by the UART console and WiFi) |

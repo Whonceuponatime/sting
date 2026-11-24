@@ -1,7 +1,7 @@
 // STING - USB Port Liveness Tester: build-time settings.
 #pragma once
 
-#define STING_VERSION "0.7.0"
+#define STING_VERSION "0.8.0"
 
 // ---- Observation window ---------------------------------------------------
 // A port that shows no enumeration within this time is reported as DISABLED.

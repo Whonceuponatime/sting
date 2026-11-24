@@ -42,7 +42,8 @@ typedef struct {
     uint32_t t_hid;          // stage 6: first HID driver activity
     uint32_t t_msc_capacity;
     uint32_t t_msc_read;
-    uint32_t t_msc_write;    // first write/modify attempt (the drive is read-only)
+    uint32_t t_msc_write;      // first host write to the volume
+    uint32_t t_eicar_removed;  // host deleted/quarantined EICAR.COM (antivirus)
     uint32_t t_marker_done;
     uint32_t t_suspend;
     uint32_t msc_sectors_read;
@@ -56,9 +57,9 @@ typedef struct {
     // disk or went on to read the directory and the file: evidence of the host
     // inspecting the volume's contents, not just its size.
     uint16_t msc_lba_read_mask;
-    // Write/modify attempts the host made to the read-only volume, and which
-    // sectors. A write to the directory or EICAR sector after the host read
-    // EICAR is the passive signature of antivirus trying to quarantine it.
+    // Writes the host made to the volume, and which sectors. A write that
+    // removes the EICAR directory entry is antivirus quarantining the file
+    // (see t_eicar_removed).
     uint16_t msc_write_attempts;
     uint16_t msc_write_lba_mask;
     uint8_t msc_flags;
@@ -67,7 +68,7 @@ typedef struct {
     uint8_t marker_sent;     // keys the host actually collected
 } observation_t;
 
-#define SESSION_REC_VERSION 4
+#define SESSION_REC_VERSION 5
 
 // One stored session (NVS blob).
 typedef struct {

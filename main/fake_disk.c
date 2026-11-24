@@ -135,28 +135,57 @@ static void eicar_sector(uint8_t *b)
 }
 #endif
 
+// The volume lives in RAM so the host can write to it (e.g. antivirus deleting
+// EICAR). It is never persisted; fake_disk_init() regenerates it every boot.
+static uint8_t s_img[FAKE_DISK_BLOCK_COUNT][FAKE_DISK_BLOCK_SIZE];
+static bool s_ready;
+
+void fake_disk_init(void)
+{
+    memset(s_img, 0, sizeof(s_img));
+    boot_sector(s_img[FAKE_DISK_LBA_BOOT]);
+    fat_sector(s_img[FAKE_DISK_LBA_FAT]);
+    root_dir_sector(s_img[FAKE_DISK_LBA_ROOTDIR]);
+    memcpy(s_img[FAKE_DISK_LBA_FILE], README, README_SIZE);
+#if EICAR_ENABLED
+    eicar_sector(s_img[FAKE_DISK_LBA_EICAR]);
+#endif
+    s_ready = true;
+}
+
 void fake_disk_read_block(uint32_t lba, uint8_t *block)
 {
-    memset(block, 0, FAKE_DISK_BLOCK_SIZE);
-    switch (lba) {
-    case FAKE_DISK_LBA_BOOT:
-        boot_sector(block);
-        break;
-    case FAKE_DISK_LBA_FAT:
-        fat_sector(block);
-        break;
-    case FAKE_DISK_LBA_ROOTDIR:
-        root_dir_sector(block);
-        break;
-    case FAKE_DISK_LBA_FILE:
-        memcpy(block, README, README_SIZE);
-        break;
-#if EICAR_ENABLED
-    case FAKE_DISK_LBA_EICAR:
-        eicar_sector(block);
-        break;
-#endif
-    default:
-        break;
+    if (!s_ready) {
+        fake_disk_init();
     }
+    if (lba < FAKE_DISK_BLOCK_COUNT) {
+        memcpy(block, s_img[lba], FAKE_DISK_BLOCK_SIZE);
+    } else {
+        memset(block, 0, FAKE_DISK_BLOCK_SIZE);
+    }
+}
+
+void fake_disk_write_block(uint32_t lba, const uint8_t *data)
+{
+    if (!s_ready) {
+        fake_disk_init();
+    }
+    if (lba < FAKE_DISK_BLOCK_COUNT) {
+        memcpy(s_img[lba], data, FAKE_DISK_BLOCK_SIZE);
+    }
+}
+
+bool fake_disk_eicar_present(void)
+{
+#if EICAR_ENABLED
+    if (!s_ready) {
+        fake_disk_init();
+    }
+    // The EICAR directory entry is the second file entry (offset 64). Antivirus
+    // deletion marks it 0xE5 or zeroes it; here it stops matching the name.
+    const uint8_t *e = &s_img[FAKE_DISK_LBA_ROOTDIR][64];
+    return memcmp(e, "EICAR   COM", 11) == 0;
+#else
+    return false;
+#endif
 }
