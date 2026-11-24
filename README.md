@@ -162,9 +162,21 @@ When `EICAR_ENABLED` is set (the default), the fake drive also carries
 industry-standard 68-byte string published specifically for testing antivirus
 software. It is not malware and does nothing if run. It lets you check whether
 the system under test runs antivirus that scans USB media: if it does, reading
-the volume should make it alert on or quarantine the file. The report shows
-whether the host read the EICAR sector; whether its antivirus reacted is
-confirmed on the host side.
+the volume should make it alert on or quarantine the file.
+
+The report shows this **passively**, on the tester itself (and the WiFi page),
+without opening anything on the host:
+
+- whether the host **read** the EICAR sector (something scanned/indexed it), and
+- whether the host **tried to write/delete** on the read-only volume. A read of
+  EICAR followed by a write attempt is the passive signature of antivirus
+  trying to quarantine it. (A write attempt alone can also be the OS writing
+  volume metadata, so it is reported factually.)
+
+This only catches antivirus that scans **automatically** on insertion/access.
+If the host only scans when a file is opened, nothing is detectable passively -
+then you must open the drive in the host's file manager (which does touch the
+host), and confirm the alert there.
 
 The string is stored XOR-obfuscated and reconstructed only in RAM when the host
 reads it, so the genuine signature never appears in this firmware image or its

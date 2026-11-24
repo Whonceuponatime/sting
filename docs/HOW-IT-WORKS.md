@@ -261,14 +261,25 @@ would treat a real threat.
 
 Its purpose here: to test whether the system under test runs antivirus that
 scans USB media. If it does, reading the volume should make that antivirus
-**alert on or quarantine** the file. The report notes whether the host read the
-EICAR sector:
+**alert on or quarantine** the file.
 
-- If the host **read** the EICAR file, the operator then checks on the host
-  side whether its antivirus reacted.
-- If the host read the directory but **did not** read the EICAR file while
-  reading others, an active antivirus may have blocked the read before it
-  reached the device - itself a useful signal.
+The tester detects this **passively** - everything appears in its own report
+and on the WiFi page, without opening anything on the host:
+
+- **The host read the EICAR sector.** Something on the host read the file's
+  bytes (a scan or indexing).
+- **The host tried to write/delete on the volume.** The drive is read-only, so
+  when antivirus tries to *quarantine* `EICAR.COM` it issues a write that the
+  board refuses - and records. A read of EICAR followed by a write attempt is
+  the passive signature of antivirus quarantine. (Windows also writes volume
+  metadata to removable drives, so a write attempt on its own is reported as a
+  fact, not proof of antivirus.)
+
+The limit of passive detection: it only catches antivirus that scans
+**automatically** on insertion or access. If the host scans only when a user
+opens the file, there is nothing for the board to observe, and confirming the
+antivirus means opening the drive in the host's file manager - which does
+interact with the host - and reading the alert there.
 
 **How it is stored.** If the literal EICAR string sat in the firmware source or
 in the compiled image, an antivirus on the *build* machine would quarantine

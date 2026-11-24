@@ -215,6 +215,20 @@ static void render_session(const session_rec_t *r)
         }
         emit("\n");
         print_read_detail(o);
+        if (o->msc_write_attempts > 0) {
+            emit("%20swrite/modify attempts: %u (refused - the volume is read-only), first %s\n",
+                 "", (unsigned)o->msc_write_attempts, fmt_time(o->t_msc_write, tb));
+            bool eicar = o->msc_lba_read_mask & (1u << FAKE_DISK_LBA_EICAR);
+            bool wr_meta = o->msc_write_lba_mask &
+                           ((1u << FAKE_DISK_LBA_FAT) | (1u << FAKE_DISK_LBA_ROOTDIR) |
+                            (1u << FAKE_DISK_LBA_EICAR));
+            if (eicar && wr_meta) {
+                emit("%20s  -> host read EICAR then tried to change the volume: likely antivirus "
+                     "quarantine\n", "");
+            } else {
+                emit("%20s  -> could be antivirus quarantine or the OS writing volume metadata\n", "");
+            }
+        }
     }
 
     // 6. Keyboard

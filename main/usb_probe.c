@@ -114,6 +114,24 @@ static void note_hid(uint8_t flag)
     UNLOCK();
 }
 
+// The host tried to write/modify the read-only volume (e.g. antivirus trying
+// to quarantine EICAR, or the OS writing metadata). Record it; nothing is ever
+// actually written.
+static void note_write(uint32_t lba)
+{
+    uint32_t now = probe_now_ms();
+    LOCK();
+    stamp(&s_obs.t_msc_write, now);
+    if (s_obs.msc_write_attempts != UINT16_MAX) {
+        s_obs.msc_write_attempts++;
+    }
+    if (lba < 16) {
+        s_obs.msc_write_lba_mask |= (uint16_t)(1u << lba);
+    }
+    changed(now);
+    UNLOCK();
+}
+
 void probe_snapshot(observation_t *out, uint32_t *generation, uint32_t *last_change_ms)
 {
     LOCK();
@@ -366,10 +384,10 @@ bool tud_msc_is_writable_cb(uint8_t lun)
 
 int32_t tud_msc_write10_cb(uint8_t lun, uint32_t lba, uint32_t offset, uint8_t *buffer, uint32_t bufsize)
 {
-    (void)lba;
     (void)offset;
     (void)buffer;
     (void)bufsize;
+    note_write(lba); // host tried to modify the volume; refuse it
     tud_msc_set_sense(lun, SCSI_SENSE_DATA_PROTECT, 0x27, 0x00); // write protected
     return -1;
 }
@@ -624,6 +642,7 @@ void probe_start(void)
     s_obs.t_hid = T_NONE;
     s_obs.t_msc_capacity = T_NONE;
     s_obs.t_msc_read = T_NONE;
+    s_obs.t_msc_write = T_NONE;
     s_obs.t_marker_done = T_NONE;
     s_obs.t_suspend = T_NONE;
     s_obs.marker_len = marker_key_count();
